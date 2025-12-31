@@ -5,32 +5,83 @@ Database Module - SQLite/PostgreSQL dengan SQLAlchemy
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import StaticPool, NullPool
 from datetime import datetime
 import os
+from pathlib import Path
 
-from app.config import DATABASE_URL, BASE_DIR
-
-# Pastikan folder data ada untuk SQLite
-if "sqlite" in DATABASE_URL:
-    data_dir = BASE_DIR / "app" / "data"
-    os.makedirs(data_dir, exist_ok=True)
-
-# Create Engine
-if "sqlite" in DATABASE_URL:
-    # SQLite - untuk local development
-    engine = create_engine(
-        DATABASE_URL, 
-        echo=False,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool
-    )
-else:
-    # PostgreSQL - untuk production
-    engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# Global variables untuk lazy initialization
+_engine = None
+_SessionLocal = None
+
+
+def get_database_url():
+    """Get database URL dari berbagai sumber"""
+    database_url = None
+    
+    # 1. Coba dari Streamlit secrets
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and 'DATABASE_URL' in st.secrets:
+            database_url = st.secrets["DATABASE_URL"]
+    except:
+        pass
+    
+    # 2. Fallback ke environment variable
+    if not database_url:
+        database_url = os.getenv("DATABASE_URL")
+    
+    # 3. Fallback ke SQLite lokal
+    if not database_url:
+        base_dir = Path(__file__).resolve().parent.parent
+        data_dir = base_dir / "app" / "data"
+        os.makedirs(data_dir, exist_ok=True)
+        database_url = f"sqlite:///{data_dir / 'stocks.db'}"
+    
+    # Fix untuk Heroku/Railway format
+    if database_url and database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    
+    return database_url
+
+
+def get_engine():
+    """Get atau create database engine (lazy initialization)"""
+    global _engine
+    
+    if _engine is None:
+        database_url = get_database_url()
+        
+        if "sqlite" in database_url:
+            # SQLite - untuk local development
+            _engine = create_engine(
+                database_url, 
+                echo=False,
+                connect_args={"check_same_thread": False},
+                poolclass=StaticPool
+            )
+        else:
+            # PostgreSQL - untuk production dengan NullPool untuk serverless
+            _engine = create_engine(
+                database_url, 
+                echo=False, 
+                pool_pre_ping=True,
+                poolclass=NullPool  # Lebih baik untuk serverless seperti Streamlit Cloud
+            )
+    
+    return _engine
+
+
+def get_session_local():
+    """Get SessionLocal class"""
+    global _SessionLocal
+    
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
+    
+    return _SessionLocal
 
 
 class Stock(Base):
@@ -107,12 +158,14 @@ class StockAnalysis(Base):
 
 def init_db():
     """Inisialisasi database - buat semua tabel"""
+    engine = get_engine()
     Base.metadata.create_all(bind=engine)
     print("✅ Database berhasil diinisialisasi!")
 
 
 def get_db():
     """Get database session"""
+    SessionLocal = get_session_local()
     db = SessionLocal()
     try:
         yield db
@@ -122,6 +175,7 @@ def get_db():
 
 def get_session():
     """Get database session (non-generator)"""
+    SessionLocal = get_session_local()
     return SessionLocal()
 
 
