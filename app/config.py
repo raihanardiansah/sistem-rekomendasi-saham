@@ -14,8 +14,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Database Configuration
 # Untuk local: gunakan SQLite
-# Untuk production: gunakan PostgreSQL dari environment variable
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Untuk production: gunakan PostgreSQL dari environment variable atau Streamlit secrets
+DATABASE_URL = None
+
+# Coba baca dari Streamlit secrets (untuk Streamlit Cloud)
+try:
+    import streamlit as st
+    if hasattr(st, 'secrets') and 'DATABASE_URL' in st.secrets:
+        DATABASE_URL = st.secrets["DATABASE_URL"]
+except:
+    pass
+
+# Fallback ke environment variable
+if not DATABASE_URL:
+    DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
     # Production (PostgreSQL)
@@ -32,7 +44,16 @@ DATA_DIR = BASE_DIR / "app" / "data"
 STOCKS_LIST_PATH = DATA_DIR / "stocks_list.csv"
 
 # News API (optional - sebagai alternatif scraping)
-NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+NEWS_API_KEY = None
+try:
+    import streamlit as st
+    if hasattr(st, 'secrets') and 'NEWS_API_KEY' in st.secrets:
+        NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
+except:
+    pass
+
+if not NEWS_API_KEY:
+    NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
 # Scraper Configuration
 SCRAPER_CONFIG = {
